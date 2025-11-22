@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { ethers } from "ethers";
-import { createInstance, SepoliaConfig } from "@zama-fhe/relayer-sdk/web";
-import type { FhevmInstance } from "@zama-fhe/relayer-sdk/web";
+import { useWallet } from "./useWallet";
+import { useFhevm } from "./useFhevm";
+import { useEncrypt } from "./useEncrypt";
+import { useDecrypt } from "./useDecrypt";
 import { MESSENGER_ABI, CONTRACT_ADDRESS } from "../contractABI";
 
 // Message type for UI
@@ -13,109 +15,84 @@ export interface Message {
   handle?: string;
 }
 
-// Sepolia chain ID
-const SEPOLIA_CHAIN_ID = 11155111;
-
 export function useMessenger() {
-  const [instance, setInstance] = useState<FhevmInstance | null>(null);
-  const [signer, setSigner] = useState<ethers.Signer | null>(null);
-  const [userAddress, setUserAddress] = useState<string>("");
-  const [isConnected, setIsConnected] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Compose the modular hooks
+  const {
+    address: userAddress,
+    isConnected,
+    isConnecting,
+    error: walletError,
+    signer,
+    connect: connectWallet,
+    disconnect: disconnectWallet,
+  } = useWallet();
+
+  const {
+    status: fhevmStatus,
+    error: fhevmError,
+    initialize: initializeFhevm,
+    isInitialized,
+  } = useFhevm();
+
+  const { encryptString, isEncrypting, error: encryptError } = useEncrypt();
+  const { decryptToStrings, isDecrypting, error: decryptError } = useDecrypt();
+
+  // Local state
   const [inbox, setInbox] = useState<Message[]>([]);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
 
-  // Initialize Relayer SDK instance
+  // Combine errors
+  const error = walletError || fhevmError || encryptError || decryptError || messageError;
+
+  // Combined loading state
+  const isLoading = isConnecting || isEncrypting || isDecrypting || isLoadingMessages;
+
+  // Initialize FHEVM when wallet connects
   useEffect(() => {
-    async function initSDK() {
-      try {
-        const inst = await createInstance(SepoliaConfig);
-        setInstance(inst);
-        console.log("Relayer SDK initialized");
-      } catch (err) {
-        console.error("Failed to initialize Relayer SDK:", err);
-        setError("Failed to initialize encryption");
-      }
+    if (isConnected && fhevmStatus === "idle") {
+      initializeFhevm();
     }
-    initSDK();
-  }, []);
+  }, [isConnected, fhevmStatus, initializeFhevm]);
 
-  // Connect wallet
+  // Connect wallet (wrapper for consistency)
   const connect = useCallback(async () => {
-    if (!window.ethereum) {
-      setError("Please install MetaMask");
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      await provider.send("eth_requestAccounts", []);
-
-      // Check network
-      const network = await provider.getNetwork();
-      if (network.chainId !== BigInt(SEPOLIA_CHAIN_ID)) {
-        setError("Please switch to Sepolia testnet");
-        setIsLoading(false);
-        return;
-      }
-
-      const signer = await provider.getSigner();
-      const address = await signer.getAddress();
-
-      setSigner(signer);
-      setUserAddress(address);
-      setIsConnected(true);
-    } catch (err) {
-      console.error("Connection failed:", err);
-      setError("Failed to connect wallet");
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+    await connectWallet();
+  }, [connectWallet]);
 
   // Disconnect wallet
   const disconnect = useCallback(() => {
-    setSigner(null);
-    setUserAddress("");
-    setIsConnected(false);
+    disconnectWallet();
     setInbox([]);
-  }, []);
+    setMessageError(null);
+  }, [disconnectWallet]);
 
   // Send encrypted message
   const sendMessage = useCallback(
     async (recipient: string, messageContent: string) => {
-      if (!instance || !signer || !userAddress) {
-        setError("Not connected");
+      if (!isInitialized || !signer || !userAddress) {
+        setMessageError("Not connected or FHEVM not ready");
         return false;
       }
 
       if (!CONTRACT_ADDRESS) {
-        setError("Contract address not configured");
+        setMessageError("Contract address not configured");
         return false;
       }
 
-      setIsLoading(true);
-      setError(null);
+      setMessageError(null);
 
       try {
-        // Convert message to BigInt (max 32 bytes for euint256)
-        const messageBytes = new TextEncoder().encode(messageContent);
-        const paddedBytes = new Uint8Array(32);
-        paddedBytes.set(messageBytes.slice(0, 32));
-        const messageValue = BigInt(
-          "0x" +
-            Array.from(paddedBytes)
-              .map((b) => b.toString(16).padStart(2, "0"))
-              .join("")
+        // Encrypt the message using the modular hook
+        const encrypted = await encryptString(
+          CONTRACT_ADDRESS,
+          userAddress,
+          messageContent
         );
 
-        // Create encrypted input using Relayer SDK
-        const input = instance.createEncryptedInput(CONTRACT_ADDRESS, userAddress);
-        input.add256(messageValue);
-        const encrypted = await input.encrypt();
+        if (!encrypted) {
+          return false;
+        }
 
         // Send transaction
         const contract = new ethers.Contract(CONTRACT_ADDRESS, MESSENGER_ABI, signer);
@@ -129,89 +106,28 @@ export function useMessenger() {
         return true;
       } catch (err) {
         console.error("Send failed:", err);
-        setError("Failed to send message");
+        setMessageError("Failed to send message");
         return false;
-      } finally {
-        setIsLoading(false);
       }
     },
-    [instance, signer, userAddress]
+    [isInitialized, signer, userAddress, encryptString]
   );
 
-  // Decrypt messages using EIP-712 signature
+  // Decrypt messages helper
   const decryptMessages = useCallback(
     async (handles: string[]): Promise<Map<string, string>> => {
-      if (!instance || !signer || !userAddress) {
+      if (!isInitialized || !signer || !userAddress) {
         return new Map();
       }
 
-      try {
-        // Generate keypair for decryption
-        const keypair = instance.generateKeypair();
+      const handlePairs = handles.map((handle) => ({
+        handle,
+        contractAddress: CONTRACT_ADDRESS,
+      }));
 
-        // Create handle-contract pairs
-        const handleContractPairs = handles.map((handle) => ({
-          handle,
-          contractAddress: CONTRACT_ADDRESS,
-        }));
-
-        // Current timestamp and duration (7 days validity)
-        const startTimestamp = Math.floor(Date.now() / 1000);
-        const durationDays = 7;
-
-        // Create EIP-712 message for signing
-        const eip712Message = instance.createEIP712(
-          keypair.publicKey,
-          [CONTRACT_ADDRESS],
-          startTimestamp,
-          durationDays
-        );
-
-        // Sign the message
-        const signature = await signer.signTypedData(
-          eip712Message.domain,
-          eip712Message.types,
-          eip712Message.message
-        );
-
-        // Decrypt the values
-        const decryptedResults = await instance.userDecrypt(
-          handleContractPairs,
-          keypair.privateKey,
-          keypair.publicKey,
-          signature,
-          [CONTRACT_ADDRESS],
-          userAddress,
-          startTimestamp,
-          durationDays
-        );
-
-        // Convert decrypted BigInts back to strings
-        const result = new Map<string, string>();
-        for (const [handle, value] of Object.entries(decryptedResults)) {
-          if (typeof value === "bigint") {
-            const hex = value.toString(16).padStart(64, "0");
-            const bytes = new Uint8Array(32);
-            for (let i = 0; i < 32; i++) {
-              bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-            }
-            // Find the end of the message (null terminator or end of bytes)
-            let endIndex = bytes.findIndex((b) => b === 0);
-            if (endIndex === -1) endIndex = 32;
-            const messageText = new TextDecoder().decode(bytes.slice(0, endIndex));
-            result.set(handle, messageText);
-          } else {
-            result.set(handle, String(value));
-          }
-        }
-
-        return result;
-      } catch (err) {
-        console.error("Decryption failed:", err);
-        return new Map();
-      }
+      return decryptToStrings(handlePairs, signer, userAddress, [CONTRACT_ADDRESS]);
     },
-    [instance, signer, userAddress]
+    [isInitialized, signer, userAddress, decryptToStrings]
   );
 
   // Fetch inbox messages
@@ -221,12 +137,12 @@ export function useMessenger() {
     }
 
     if (!CONTRACT_ADDRESS) {
-      setError("Contract address not configured");
+      setMessageError("Contract address not configured");
       return;
     }
 
-    setIsLoading(true);
-    setError(null);
+    setIsLoadingMessages(true);
+    setMessageError(null);
 
     try {
       const contract = new ethers.Contract(CONTRACT_ADDRESS, MESSENGER_ABI, signer);
@@ -252,9 +168,9 @@ export function useMessenger() {
       setInbox(messages);
     } catch (err) {
       console.error("Refresh failed:", err);
-      setError("Failed to load messages");
+      setMessageError("Failed to load messages");
     } finally {
-      setIsLoading(false);
+      setIsLoadingMessages(false);
     }
   }, [signer, userAddress]);
 
@@ -270,7 +186,6 @@ export function useMessenger() {
         return;
       }
 
-      setIsLoading(true);
       try {
         const decryptedMap = await decryptMessages([message.handle]);
         const decryptedContent = decryptedMap.get(message.handle);
@@ -283,8 +198,8 @@ export function useMessenger() {
             )
           );
         }
-      } finally {
-        setIsLoading(false);
+      } catch (err) {
+        console.error("Decrypt message failed:", err);
       }
     },
     [inbox, decryptMessages]
@@ -295,7 +210,6 @@ export function useMessenger() {
     const encryptedMessages = inbox.filter((msg) => msg.encrypted && msg.handle);
     if (encryptedMessages.length === 0) return;
 
-    setIsLoading(true);
     try {
       const handles = encryptedMessages.map((msg) => msg.handle!);
       const decryptedMap = await decryptMessages(handles);
@@ -312,8 +226,8 @@ export function useMessenger() {
           return msg;
         })
       );
-    } finally {
-      setIsLoading(false);
+    } catch (err) {
+      console.error("Decrypt all failed:", err);
     }
   }, [inbox, decryptMessages]);
 
@@ -324,6 +238,8 @@ export function useMessenger() {
     error,
     userAddress,
     inbox,
+    fhevmStatus,
+    isInitialized,
     // Actions
     connect,
     disconnect,
@@ -335,9 +251,8 @@ export function useMessenger() {
   };
 }
 
-// Window type declaration for ethereum
-declare global {
-  interface Window {
-    ethereum?: ethers.Eip1193Provider;
-  }
-}
+// Re-export types and hooks for convenience
+export { useWallet } from "./useWallet";
+export { useFhevm } from "./useFhevm";
+export { useEncrypt } from "./useEncrypt";
+export { useDecrypt } from "./useDecrypt";
