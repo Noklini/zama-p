@@ -1,6 +1,8 @@
 # Private Messenger - Zama FHEVM
-
 A simple private onchain messenger using Zama's Fully Homomorphic Encryption (FHE) technology. Messages are encrypted end-to-end - only the sender and recipient can decrypt them.
+
+![Screenshot_6](https://github.com/user-attachments/assets/5092d5da-53eb-4166-bb6f-174a382a0f77)
+
 
 ## Project Structure
 
