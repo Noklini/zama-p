@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "fhevm/lib/TFHE.sol";
+import "@fhevm/solidity/lib/FHE.sol";
+import {ZamaEthereumConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 
 /// @title PrivateMessenger
 /// @notice A simple private messaging contract using FHE encryption
 /// @dev Messages are encrypted end-to-end, only sender and recipient can decrypt
-contract PrivateMessenger {
+contract PrivateMessenger is ZamaEthereumConfig {
     /// @notice Represents an encrypted message
     struct Message {
         address sender;
@@ -40,14 +41,14 @@ contract PrivateMessenger {
     /// @param inputProof Proof for validating the encrypted input
     function sendMessage(
         address to,
-        einput encryptedContent,
+        externalEuint64 encryptedContent,
         bytes calldata inputProof
     ) external {
         if (to == address(0)) revert InvalidRecipient();
         if (to == msg.sender) revert CannotMessageSelf();
 
         // Validate and convert the encrypted input
-        euint64 content = TFHE.asEuint64(encryptedContent, inputProof);
+        euint64 content = FHE.fromExternal(encryptedContent, inputProof);
 
         // Create the message
         Message memory newMessage = Message({
@@ -62,9 +63,9 @@ contract PrivateMessenger {
         _outbox[msg.sender].push(newMessage);
 
         // Grant ACL permissions - both sender and recipient can decrypt
-        TFHE.allow(content, address(this));
-        TFHE.allow(content, msg.sender);
-        TFHE.allow(content, to);
+        FHE.allowThis(content);
+        FHE.allow(content, msg.sender);
+        FHE.allow(content, to);
 
         emit MessageSent(msg.sender, to, block.timestamp);
     }

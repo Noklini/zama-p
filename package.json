@@ -9,13 +9,13 @@
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@types/node": "^20.0.0",
     "hardhat": "^2.19.0",
-    "typescript": "^5.3.0",
     "ts-node": "^10.9.0",
-    "@types/node": "^20.0.0"
+    "typescript": "^5.3.0"
   },
   "dependencies": {
-    "fhevm": "^0.6.0",
+    "@fhevm/solidity": "^0.9.1",
     "dotenv": "^16.3.0"
   }
 }

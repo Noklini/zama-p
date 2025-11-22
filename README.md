@@ -12,8 +12,14 @@ A simple private onchain messenger using Zama's Fully Homomorphic Encryption (FH
 ├── frontend/
 │   └── src/
 │       ├── App.tsx             # Main app
+│       ├── core/
+│       │   └── fhevm.ts        # SDK initialization
 │       ├── hooks/
-│       │   └── useMessenger.ts # SDK integration
+│       │   ├── useWallet.ts    # Wallet connection
+│       │   ├── useFhevm.ts     # SDK state management
+│       │   ├── useEncrypt.ts   # Encryption operations
+│       │   ├── useDecrypt.ts   # Decryption operations
+│       │   └── useMessenger.ts # Composed hook
 │       └── components/
 │           ├── SendMessage.tsx
 │           └── Inbox.tsx
@@ -24,7 +30,7 @@ A simple private onchain messenger using Zama's Fully Homomorphic Encryption (FH
 ## Deployed Contract
 
 **Network:** Sepolia Testnet
-**Contract Address:** `0x8EDa7fCb688bDD4BF00d0Be1c0A398FEFC9729Cf`
+**Contract Address:** `0x4FEb9302Ff4841b699FF96cC52Bc0Bda865C2466`
 
 ## Prerequisites
 
@@ -69,7 +75,7 @@ npm install
 Create `frontend/.env` (already configured with deployed contract):
 
 ```bash
-VITE_CONTRACT_ADDRESS=0x8EDa7fCb688bDD4BF00d0Be1c0A398FEFC9729Cf
+VITE_CONTRACT_ADDRESS=0x4FEb9302Ff4841b699FF96cC52Bc0Bda865C2466
 ```
 
 ### 5. Run Frontend
@@ -82,8 +88,8 @@ Open http://localhost:5173 in your browser.
 
 ## Usage
 
-1. **Connect Wallet** - Connect MetaMask (must be on Sepolia)
-2. **Send Message** - Enter recipient address and message (max 32 chars)
+1. **Connect Wallet** - Connect MetaMask (auto-switches to Sepolia if needed)
+2. **Send Message** - Enter recipient address and message (max 8 chars)
 3. **Receive Messages** - Click "Refresh" to load and decrypt your inbox
 
 ## How It Works
@@ -103,6 +109,6 @@ Open http://localhost:5173 in your browser.
 
 ## Limitations
 
-- Message content limited to 32 characters (stored as euint256)
+- Message content limited to 8 characters (stored as euint64)
 - Requires Sepolia testnet
 - Experimental - not for production use

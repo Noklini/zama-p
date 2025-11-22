@@ -84,6 +84,9 @@ export function useMessenger() {
 
       try {
         // Encrypt the message using the modular hook
+        console.log("Encrypting message for contract:", CONTRACT_ADDRESS);
+        console.log("User address:", userAddress);
+
         const encrypted = await encryptString(
           CONTRACT_ADDRESS,
           userAddress,
@@ -93,6 +96,9 @@ export function useMessenger() {
         if (!encrypted) {
           return false;
         }
+
+        console.log("Encrypted handle:", encrypted.handles[0]);
+        console.log("Input proof length:", encrypted.inputProof.length);
 
         // Send transaction
         const contract = new ethers.Contract(CONTRACT_ADDRESS, MESSENGER_ABI, signer);

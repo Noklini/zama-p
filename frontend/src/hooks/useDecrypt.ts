@@ -25,17 +25,17 @@ export interface UseDecryptReturn {
 }
 
 /**
- * Convert BigInt to string (reverse of stringToBigInt)
+ * Convert BigInt to string for euint64 (8 bytes)
  */
 function bigIntToString(value: bigint): string {
-  const hex = value.toString(16).padStart(64, "0");
-  const bytes = new Uint8Array(32);
-  for (let i = 0; i < 32; i++) {
+  const hex = value.toString(16).padStart(16, "0"); // 16 hex chars = 8 bytes for euint64
+  const bytes = new Uint8Array(8);
+  for (let i = 0; i < 8; i++) {
     bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   }
   // Find the end of the message (null terminator or end of bytes)
   let endIndex = bytes.findIndex((b) => b === 0);
-  if (endIndex === -1) endIndex = 32;
+  if (endIndex === -1) endIndex = 8;
   return new TextDecoder().decode(bytes.slice(0, endIndex));
 }
 
