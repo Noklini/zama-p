@@ -5,7 +5,6 @@ A simple private onchain messenger using Zama's Fully Homomorphic Encryption (FH
 ## Project Structure
 
 ```
-messenger/
 ├── contracts/
 │   └── PrivateMessenger.sol    # Smart contract
 ├── scripts/
@@ -21,6 +20,11 @@ messenger/
 ├── hardhat.config.ts
 └── package.json
 ```
+
+## Deployed Contract
+
+**Network:** Sepolia Testnet
+**Contract Address:** `0x8EDa7fCb688bDD4BF00d0Be1c0A398FEFC9729Cf`
 
 ## Prerequisites
 
@@ -42,7 +46,7 @@ npm install
 Create `.env` file:
 
 ```bash
-SEPOLIA_RPC_URL=https://eth-sepolia.public.blastapi.io
+SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
 PRIVATE_KEY=your_private_key_here
 ```
 
@@ -62,10 +66,10 @@ cd frontend
 npm install
 ```
 
-Create `frontend/.env`:
+Create `frontend/.env` (already configured with deployed contract):
 
 ```bash
-VITE_CONTRACT_ADDRESS=0x_your_deployed_contract_address
+VITE_CONTRACT_ADDRESS=0x8EDa7fCb688bDD4BF00d0Be1c0A398FEFC9729Cf
 ```
 
 ### 5. Run Frontend
