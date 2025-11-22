@@ -13,6 +13,8 @@ function App() {
     disconnect,
     sendMessage,
     refreshInbox,
+    decryptInboxMessage,
+    decryptAllInbox,
   } = useMessenger();
 
   return (
@@ -50,7 +52,13 @@ function App() {
             {error && <div style={styles.errorBanner}>{error}</div>}
 
             <SendMessage onSend={sendMessage} isLoading={isLoading} />
-            <Inbox messages={inbox} onRefresh={refreshInbox} isLoading={isLoading} />
+            <Inbox
+              messages={inbox}
+              onRefresh={refreshInbox}
+              onDecrypt={decryptInboxMessage}
+              onDecryptAll={decryptAllInbox}
+              isLoading={isLoading}
+            />
           </div>
         )}
       </main>

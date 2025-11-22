@@ -11,4 +11,16 @@ export default defineConfig({
       buffer: "buffer",
     },
   },
+  optimizeDeps: {
+    exclude: ["@zama-fhe/relayer-sdk"],
+  },
+  server: {
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    },
+  },
+  build: {
+    target: "esnext",
+  },
 });

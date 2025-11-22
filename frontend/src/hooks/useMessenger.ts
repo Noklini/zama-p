@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { ethers } from "ethers";
-import { createInstance, SepoliaConfig } from "@zama-fhe/relayer-sdk";
+import { createInstance, SepoliaConfig } from "@zama-fhe/relayer-sdk/web";
+import type { FhevmInstance } from "@zama-fhe/relayer-sdk/web";
 import { MESSENGER_ABI, CONTRACT_ADDRESS } from "../contractABI";
 
 // Message type for UI
@@ -9,10 +10,11 @@ export interface Message {
   content: string;
   timestamp: Date;
   encrypted: boolean;
+  handle?: string;
 }
 
-// SDK instance type
-type FhevmInstance = Awaited<ReturnType<typeof createInstance>>;
+// Sepolia chain ID
+const SEPOLIA_CHAIN_ID = 11155111;
 
 export function useMessenger() {
   const [instance, setInstance] = useState<FhevmInstance | null>(null);
@@ -23,15 +25,16 @@ export function useMessenger() {
   const [error, setError] = useState<string | null>(null);
   const [inbox, setInbox] = useState<Message[]>([]);
 
-  // Initialize SDK
+  // Initialize Relayer SDK instance
   useEffect(() => {
     async function initSDK() {
       try {
         const inst = await createInstance(SepoliaConfig);
         setInstance(inst);
+        console.log("Relayer SDK initialized");
       } catch (err) {
-        console.error("Failed to initialize SDK:", err);
-        setError("Failed to initialize encryption SDK");
+        console.error("Failed to initialize Relayer SDK:", err);
+        setError("Failed to initialize encryption");
       }
     }
     initSDK();
@@ -53,7 +56,7 @@ export function useMessenger() {
 
       // Check network
       const network = await provider.getNetwork();
-      if (network.chainId !== BigInt(11155111)) {
+      if (network.chainId !== BigInt(SEPOLIA_CHAIN_ID)) {
         setError("Please switch to Sepolia testnet");
         setIsLoading(false);
         return;
@@ -98,16 +101,18 @@ export function useMessenger() {
       setError(null);
 
       try {
-        // Convert message to number (simplified - in production use proper encoding)
+        // Convert message to BigInt (max 32 bytes for euint256)
         const messageBytes = new TextEncoder().encode(messageContent);
+        const paddedBytes = new Uint8Array(32);
+        paddedBytes.set(messageBytes.slice(0, 32));
         const messageValue = BigInt(
           "0x" +
-            Array.from(messageBytes.slice(0, 32))
+            Array.from(paddedBytes)
               .map((b) => b.toString(16).padStart(2, "0"))
               .join("")
         );
 
-        // Create encrypted input
+        // Create encrypted input using Relayer SDK
         const input = instance.createEncryptedInput(CONTRACT_ADDRESS, userAddress);
         input.add256(messageValue);
         const encrypted = await input.encrypt();
@@ -133,9 +138,85 @@ export function useMessenger() {
     [instance, signer, userAddress]
   );
 
-  // Fetch and decrypt inbox messages
+  // Decrypt messages using EIP-712 signature
+  const decryptMessages = useCallback(
+    async (handles: string[]): Promise<Map<string, string>> => {
+      if (!instance || !signer || !userAddress) {
+        return new Map();
+      }
+
+      try {
+        // Generate keypair for decryption
+        const keypair = instance.generateKeypair();
+
+        // Create handle-contract pairs
+        const handleContractPairs = handles.map((handle) => ({
+          handle,
+          contractAddress: CONTRACT_ADDRESS,
+        }));
+
+        // Current timestamp and duration (7 days validity)
+        const startTimestamp = Math.floor(Date.now() / 1000);
+        const durationDays = 7;
+
+        // Create EIP-712 message for signing
+        const eip712Message = instance.createEIP712(
+          keypair.publicKey,
+          [CONTRACT_ADDRESS],
+          startTimestamp,
+          durationDays
+        );
+
+        // Sign the message
+        const signature = await signer.signTypedData(
+          eip712Message.domain,
+          eip712Message.types,
+          eip712Message.message
+        );
+
+        // Decrypt the values
+        const decryptedResults = await instance.userDecrypt(
+          handleContractPairs,
+          keypair.privateKey,
+          keypair.publicKey,
+          signature,
+          [CONTRACT_ADDRESS],
+          userAddress,
+          startTimestamp,
+          durationDays
+        );
+
+        // Convert decrypted BigInts back to strings
+        const result = new Map<string, string>();
+        for (const [handle, value] of Object.entries(decryptedResults)) {
+          if (typeof value === "bigint") {
+            const hex = value.toString(16).padStart(64, "0");
+            const bytes = new Uint8Array(32);
+            for (let i = 0; i < 32; i++) {
+              bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+            }
+            // Find the end of the message (null terminator or end of bytes)
+            let endIndex = bytes.findIndex((b) => b === 0);
+            if (endIndex === -1) endIndex = 32;
+            const messageText = new TextDecoder().decode(bytes.slice(0, endIndex));
+            result.set(handle, messageText);
+          } else {
+            result.set(handle, String(value));
+          }
+        }
+
+        return result;
+      } catch (err) {
+        console.error("Decryption failed:", err);
+        return new Map();
+      }
+    },
+    [instance, signer, userAddress]
+  );
+
+  // Fetch inbox messages
   const refreshInbox = useCallback(async () => {
-    if (!instance || !signer || !userAddress) {
+    if (!signer || !userAddress) {
       return;
     }
 
@@ -154,57 +235,17 @@ export function useMessenger() {
       const messages: Message[] = [];
 
       for (let i = 0; i < count; i++) {
-        const [sender, encryptedHandle, timestamp] = await contract.getInboxMessage(
+        const [sender, encryptedContent, timestamp] = await contract.getInboxMessage(
           userAddress,
           i
         );
 
-        // Try to decrypt the message
-        let content = "[Encrypted]";
-        let encrypted = true;
-
-        try {
-          // Generate keypair for decryption
-          const keypair = instance.generateKeyPair();
-
-          // Create EIP712 message
-          const eip712Message = instance.createEIP712Message(
-            encryptedHandle,
-            keypair.publicKey
-          );
-
-          // Sign the message
-          const signature = await signer.signTypedData(
-            eip712Message.domain,
-            eip712Message.types,
-            eip712Message.message
-          );
-
-          // Decrypt
-          const decrypted = await instance.userDecrypt(
-            keypair,
-            signature,
-            encryptedHandle
-          );
-
-          // Convert BigInt back to string
-          const hexString = decrypted.toString(16).padStart(64, "0");
-          const bytes = [];
-          for (let j = 0; j < hexString.length; j += 2) {
-            const byte = parseInt(hexString.substr(j, 2), 16);
-            if (byte !== 0) bytes.push(byte);
-          }
-          content = new TextDecoder().decode(new Uint8Array(bytes));
-          encrypted = false;
-        } catch (decryptErr) {
-          console.warn("Could not decrypt message:", decryptErr);
-        }
-
         messages.push({
           sender,
-          content,
+          content: "[Encrypted - click to decrypt]",
           timestamp: new Date(Number(timestamp) * 1000),
-          encrypted,
+          encrypted: true,
+          handle: encryptedContent,
         });
       }
 
@@ -215,7 +256,66 @@ export function useMessenger() {
     } finally {
       setIsLoading(false);
     }
-  }, [instance, signer, userAddress]);
+  }, [signer, userAddress]);
+
+  // Decrypt a message in the inbox by index
+  const decryptInboxMessage = useCallback(
+    async (index: number) => {
+      if (index < 0 || index >= inbox.length) {
+        return;
+      }
+
+      const message = inbox[index];
+      if (!message.handle || !message.encrypted) {
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        const decryptedMap = await decryptMessages([message.handle]);
+        const decryptedContent = decryptedMap.get(message.handle);
+        if (decryptedContent) {
+          setInbox((prev) =>
+            prev.map((msg, i) =>
+              i === index
+                ? { ...msg, content: decryptedContent, encrypted: false }
+                : msg
+            )
+          );
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [inbox, decryptMessages]
+  );
+
+  // Decrypt all messages in inbox
+  const decryptAllInbox = useCallback(async () => {
+    const encryptedMessages = inbox.filter((msg) => msg.encrypted && msg.handle);
+    if (encryptedMessages.length === 0) return;
+
+    setIsLoading(true);
+    try {
+      const handles = encryptedMessages.map((msg) => msg.handle!);
+      const decryptedMap = await decryptMessages(handles);
+
+      setInbox((prev) =>
+        prev.map((msg) => {
+          if (msg.handle && decryptedMap.has(msg.handle)) {
+            return {
+              ...msg,
+              content: decryptedMap.get(msg.handle)!,
+              encrypted: false,
+            };
+          }
+          return msg;
+        })
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, [inbox, decryptMessages]);
 
   return {
     // State
@@ -229,6 +329,9 @@ export function useMessenger() {
     disconnect,
     sendMessage,
     refreshInbox,
+    decryptMessages,
+    decryptInboxMessage,
+    decryptAllInbox,
   };
 }
 

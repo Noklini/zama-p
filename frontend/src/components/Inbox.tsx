@@ -3,10 +3,12 @@ import { Message } from "../hooks/useMessenger";
 interface InboxProps {
   messages: Message[];
   onRefresh: () => void;
+  onDecrypt: (index: number) => void;
+  onDecryptAll: () => void;
   isLoading: boolean;
 }
 
-export function Inbox({ messages, onRefresh, isLoading }: InboxProps) {
+export function Inbox({ messages, onRefresh, onDecrypt, onDecryptAll, isLoading }: InboxProps) {
   const formatAddress = (address: string) => {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
   };
@@ -15,13 +17,26 @@ export function Inbox({ messages, onRefresh, isLoading }: InboxProps) {
     return date.toLocaleString();
   };
 
+  const hasEncryptedMessages = messages.some((msg) => msg.encrypted);
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
         <h2 style={styles.title}>Inbox</h2>
-        <button onClick={onRefresh} style={styles.refreshButton} disabled={isLoading}>
-          {isLoading ? "Loading..." : "Refresh"}
-        </button>
+        <div style={styles.headerButtons}>
+          {hasEncryptedMessages && (
+            <button
+              onClick={onDecryptAll}
+              style={styles.decryptAllButton}
+              disabled={isLoading}
+            >
+              {isLoading ? "Decrypting..." : "Decrypt All"}
+            </button>
+          )}
+          <button onClick={onRefresh} style={styles.refreshButton} disabled={isLoading}>
+            {isLoading ? "Loading..." : "Refresh"}
+          </button>
+        </div>
       </div>
 
       {messages.length === 0 ? (
@@ -41,13 +56,22 @@ export function Inbox({ messages, onRefresh, isLoading }: InboxProps) {
               </div>
               <div style={styles.content}>
                 {msg.encrypted ? (
-                  <span style={styles.encrypted}>[Unable to decrypt]</span>
+                  <span style={styles.encrypted}>{msg.content}</span>
                 ) : (
                   msg.content
                 )}
               </div>
               {msg.encrypted && (
-                <span style={styles.encryptedBadge}>Encrypted</span>
+                <button
+                  onClick={() => onDecrypt(index)}
+                  style={styles.decryptButton}
+                  disabled={isLoading}
+                >
+                  Decrypt
+                </button>
+              )}
+              {!msg.encrypted && (
+                <span style={styles.decryptedBadge}>Decrypted</span>
               )}
             </div>
           ))}
@@ -69,6 +93,10 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     marginBottom: "16px",
   },
+  headerButtons: {
+    display: "flex",
+    gap: "8px",
+  },
   title: {
     fontSize: "18px",
     fontWeight: "600",
@@ -77,6 +105,15 @@ const styles: Record<string, React.CSSProperties> = {
   refreshButton: {
     background: "#333",
     color: "#fafafa",
+    border: "none",
+    borderRadius: "6px",
+    padding: "8px 16px",
+    fontSize: "14px",
+    cursor: "pointer",
+  },
+  decryptAllButton: {
+    background: "#7c3aed",
+    color: "#fff",
     border: "none",
     borderRadius: "6px",
     padding: "8px 16px",
@@ -122,17 +159,30 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "14px",
     color: "#fafafa",
     wordBreak: "break-word",
+    paddingRight: "80px",
   },
   encrypted: {
-    color: "#666",
+    color: "#888",
     fontStyle: "italic",
   },
-  encryptedBadge: {
+  decryptButton: {
     position: "absolute",
-    top: "8px",
-    right: "8px",
-    background: "#333",
-    color: "#888",
+    bottom: "12px",
+    right: "12px",
+    background: "#7c3aed",
+    color: "#fff",
+    border: "none",
+    borderRadius: "4px",
+    padding: "6px 12px",
+    fontSize: "12px",
+    cursor: "pointer",
+  },
+  decryptedBadge: {
+    position: "absolute",
+    top: "12px",
+    right: "12px",
+    background: "#065f46",
+    color: "#6ee7b7",
     fontSize: "10px",
     padding: "2px 6px",
     borderRadius: "4px",
